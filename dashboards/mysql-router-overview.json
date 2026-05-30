@@ -1,0 +1,897 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Operative Überwachung aller MySQL Router Instanzen — Verbindungen, Routen, Durchsatz, Health",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": ["mysql-router"],
+      "targetBlank": false,
+      "title": "Route Details",
+      "tooltip": "Detailansicht pro Router",
+      "type": "dashboards",
+      "url": ""
+    }
+  ],
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Erreichbarkeit des MySQL Routers über die REST API.\n\n**Grenzwerte:**\n- 🟢 Up (1) — Router antwortet\n- 🔴 Down (0) — REST API nicht erreichbar; alle anderen Metriken fallen weg\n\nEin Ausfall bedeutet, dass der Router keine neuen Verbindungen annimmt oder abgestürzt ist.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [
+            {
+              "options": {
+                "0": {"color": "red", "index": 0, "text": "Down"},
+                "1": {"color": "green", "index": 1, "text": "Up"}
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "mysql_router_up{job=\"mysql_router\", instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Router Status",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Summe aller aktiven Client-TCP-Verbindungen über alle Routen eines Routers.\n\n**Grenzwerte:**\n- 🟢 < 50 — normale Last\n- 🟡 50–199 — erhöhte Last, beobachten\n- 🔴 ≥ 200 — kritisch, mögliche Verbindungssättigung\n\nHohe Werte können auf fehlende Connection-Pools in der Applikation oder einen hängenden Workload hinweisen.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 50},
+              {"color": "red", "value": 200}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "sum by(instance) (mysql_router_route_active_connections{job=\"mysql_router\", instance=~\"$instance\"})",
+          "instant": true,
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Aktive Verbindungen (gesamt)",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Rate neuer TCP-Verbindungen pro Sekunde (gleitend über 2 Minuten), summiert über alle Routen.\n\n**Grenzwerte:**\n- 🟢 < 10/s — normal\n- 🟡 10–49/s — erhöhter Verbindungsaufbau, prüfen ob Connection-Pooling aktiv ist\n- 🔴 ≥ 50/s — kritisch; ohne Pooling erzeugt jede Rate > 1000/min merklichen MySQL-Overhead\n\nHohe Raten bei gleichzeitig geringen aktiven Verbindungen deuten auf sehr kurze Verbindungslebenszeiten hin.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 10},
+              {"color": "red", "value": 50}
+            ]
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "sum by(instance) (irate(mysql_router_route_total_connections_total{job=\"mysql_router\", instance=~\"$instance\"}[2m]))",
+          "instant": true,
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Neue Verbindungen/s",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Laufzeit des MySQL Router-Prozesses seit dem letzten Start.\n\n**Grenzwerte:**\n- 🔴 < 5 Min — Router wurde kürzlich neu gestartet (Absturz oder Wartung)\n- 🟡 5–60 Min — laufende Stabilisierungsphase\n- 🟢 ≥ 1 Stunde — stabiler Betrieb\n\nEin niedriger Uptime-Wert zusammen mit einem vorherigen Down-Event ist ein Hinweis auf einen unerwarteten Absturz.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 300},
+              {"color": "green", "value": 3600}
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "mysql_router_uptime_seconds{job=\"mysql_router\", instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Uptime",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Anzahl der durch den Router temporär gesperrten Client-Hosts.\n\nEin Host wird gesperrt, wenn er zu viele fehlgeschlagene Verbindungsversuche erzeugt hat (Standard: max_connect_errors). Gesperrte Hosts können keine neuen Verbindungen aufbauen.\n\n**Grenzwerte:**\n- 🟢 0 — kein Problem\n- 🔴 ≥ 1 — mindestens ein Client-Host ist gesperrt; Ursache sofort prüfen\n\nTypische Ursachen: fehlerhafte Credentials, abgelaufene SSL-Zertifikate, Netzwerkprobleme.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [
+            {
+              "options": {
+                "0": {"color": "green", "index": 0, "text": "Keine"}
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+      "id": 5,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "sum by(instance) (mysql_router_route_blocked_hosts{job=\"mysql_router\", instance=~\"$instance\"})",
+          "instant": true,
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Blocked Hosts",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Ergebnis des letzten Metadata-Cache-Refreshes (Minimum über alle Metadata-Instanzen).\n\nDer Metadata Cache synchronisiert die InnoDB-Cluster-Topologie (Primary/Replica-Rollen, verfügbare Nodes). Bei einem Fehler arbeitet der Router mit veralteten Routing-Informationen und leitet Verbindungen möglicherweise an falsche Nodes weiter.\n\n**Grenzwerte:**\n- 🟢 OK (1) — letzter Refresh erfolgreich\n- 🔴 Fehler (0) — Refresh fehlgeschlagen; Cluster-Konnektivität des Routers prüfen",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [
+            {
+              "options": {
+                "0": {"color": "red", "index": 0, "text": "Fehler"},
+                "1": {"color": "green", "index": 1, "text": "OK"}
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+      "id": 6,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "min by(instance) (mysql_router_metadata_refresh_succeeded{job=\"mysql_router\", instance=~\"$instance\"})",
+          "instant": true,
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Metadata Cache",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Zeitlicher Verlauf aktiver Client-Verbindungen pro Route und Router-Instanz.\n\nZeigt Lastspitzen, Lastverteilung zwischen RW- und RO-Routen sowie Auswirkungen von Deployments oder Failover-Ereignissen.\n\n**Grenzwerte (horizontale Linien):**\n- 🟡 50 Verbindungen — erhöhte Last, Connection-Pooling prüfen\n- 🔴 200 Verbindungen — kritische Sättigung; MySQL-Server kann überlastet werden",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Verbindungen",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {"type": "linear"},
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "none"},
+            "thresholdsStyle": {"mode": "line"}
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 50},
+              {"color": "red", "value": 200}
+            ]
+          },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "id": 7,
+      "options": {
+        "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "mysql_router_route_active_connections{job=\"mysql_router\", instance=~\"$instance\"}",
+          "legendFormat": "{{instance}} / {{route}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Aktive Verbindungen pro Route",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Rate neuer TCP-Verbindungen pro Sekunde, aufgeschlüsselt nach Router-Instanz und Route (2-Min-Fenster).\n\nEin kontinuierlich hoher Wert ohne entsprechend hohe aktive Verbindungen deutet auf kurzlebige Verbindungen hin — typisches Zeichen für fehlenden Connection-Pool in der Applikation.\n\n**Grenzwerte (horizontale Linien):**\n- 🟡 10/s — erhöht; Connection-Pooling empfohlen\n- 🔴 50/s — kritisch; signifikanter MySQL-Overhead durch Authentifizierung und Thread-Erzeugung",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Verbindungen/s",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {"type": "linear"},
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "none"},
+            "thresholdsStyle": {"mode": "line"}
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 10},
+              {"color": "red", "value": 50}
+            ]
+          },
+          "unit": "reqps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "id": 8,
+      "options": {
+        "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "irate(mysql_router_route_total_connections_total{job=\"mysql_router\", instance=~\"$instance\"}[2m])",
+          "legendFormat": "{{instance}} / {{route}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Neue Verbindungen/s pro Route",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Datendurchsatz vom MySQL-Server in Richtung Client (Lesedaten / Query-Results) pro Route in Bytes/s.\n\nHohe RX-Werte auf RO-Routen sind normal (viele Leseanfragen). Hohe Werte auf RW-Routen deuten auf große Result-Sets oder fehlende SELECT-Limitierungen hin.\n\n**Grenzwerte (horizontale Linien):**\n- 🟡 10 MB/s (10.485.760 B/s) — erhöhter Durchsatz\n- 🔴 100 MB/s (104.857.600 B/s) — kritisch; Netzwerk- oder MySQL-IO-Engpass wahrscheinlich",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Bytes/s",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {"type": "linear"},
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "none"},
+            "thresholdsStyle": {"mode": "line"}
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 10485760},
+              {"color": "red", "value": 104857600}
+            ]
+          },
+          "unit": "Bps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "id": 9,
+      "options": {
+        "legend": {"calcs": ["lastNotNull", "mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "irate(mysql_router_route_bytes_from_server_total{job=\"mysql_router\", instance=~\"$instance\"}[2m])",
+          "legendFormat": "{{instance}} / {{route}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Durchsatz vom Server — RX (Client ← Server)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Datendurchsatz vom Client zum MySQL-Server (Queries / Schreibdaten) pro Route in Bytes/s.\n\nHohe TX-Werte auf RW-Routen sind normal bei schreibintensiven Workloads. Hohe TX auf RO-Routen können auf fehlerhaftes Applikations-Routing hinweisen (Schreibzugriffe auf die Read-Only-Route).\n\n**Grenzwerte (horizontale Linien):**\n- 🟡 10 MB/s (10.485.760 B/s) — erhöhter Durchsatz\n- 🔴 100 MB/s (104.857.600 B/s) — kritisch; möglicher Bulk-Insert oder LOAD DATA ohne Drosselung",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Bytes/s",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {"type": "linear"},
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {"group": "A", "mode": "none"},
+            "thresholdsStyle": {"mode": "line"}
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 10485760},
+              {"color": "red", "value": 104857600}
+            ]
+          },
+          "unit": "Bps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "id": 10,
+      "options": {
+        "legend": {"calcs": ["lastNotNull", "mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "irate(mysql_router_route_bytes_to_server_total{job=\"mysql_router\", instance=~\"$instance\"}[2m])",
+          "legendFormat": "{{instance}} / {{route}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Durchsatz zum Server — TX (Client → Server)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Snapshot aller Routen über alle gewählten Router-Instanzen mit Ampel-Färbung.\n\n**Spalten:**\n- **Health** — 🟢 Healthy / 🔴 Unhealthy (Route erreichbar?)\n- **Aktive Verbindungen** — aktuelle Client-Verbindungen (🟡 ≥ 50, 🔴 ≥ 200)\n- **Blocked Hosts** — gesperrte Client-Hosts (🔴 ≥ 1)\n- **Destinations** — Anzahl Backend-MySQL-Nodes (🔴 = 0, 🟡 = 1 = kein HA)\n- **Neue Verbindungen/s** — aktuelle Verbindungsrate (🟡 ≥ 10/s, 🔴 ≥ 50/s)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {
+            "align": "auto",
+            "cellOptions": {"type": "auto"},
+            "inspect": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{"color": "green", "value": null}]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "Health"},
+            "properties": [
+              {"id": "custom.cellOptions", "value": {"type": "color-background"}},
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "0": {"color": "red", "index": 0, "text": "Unhealthy"},
+                      "1": {"color": "green", "index": 1, "text": "Healthy"}
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Blocked Hosts"},
+            "properties": [
+              {"id": "custom.cellOptions", "value": {"type": "color-background"}},
+              {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Aktive Verbindungen"},
+            "properties": [
+              {"id": "custom.cellOptions", "value": {"type": "color-background"}},
+              {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 50}, {"color": "red", "value": 200}]}}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Destinations"},
+            "properties": [
+              {"id": "custom.cellOptions", "value": {"type": "color-background"}},
+              {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 1}, {"color": "green", "value": 2}]}}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "Neue Verbindungen/s"},
+            "properties": [
+              {"id": "unit", "value": "reqps"},
+              {"id": "decimals", "value": 2},
+              {"id": "custom.cellOptions", "value": {"type": "color-background"}},
+              {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 10}, {"color": "red", "value": 50}]}}
+            ]
+          }
+        ]
+      },
+      "gridPos": {"h": 10, "w": 16, "x": 0, "y": 20},
+      "id": 11,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {"countRows": false, "fields": "", "reducer": ["sum"], "show": false},
+        "showHeader": true,
+        "sortBy": [{"desc": false, "displayName": "Route"}]
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "mysql_router_route_health{job=\"mysql_router\", instance=~\"$instance\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "Health"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "mysql_router_route_active_connections{job=\"mysql_router\", instance=~\"$instance\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "ActiveConns"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "mysql_router_route_blocked_hosts{job=\"mysql_router\", instance=~\"$instance\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "Blocked"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "mysql_router_route_destinations{job=\"mysql_router\", instance=~\"$instance\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "Destinations"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "irate(mysql_router_route_total_connections_total{job=\"mysql_router\", instance=~\"$instance\"}[2m])",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "Rate"
+        }
+      ],
+      "title": "Routen Übersicht",
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {"byField": "route", "mode": "outer"}
+        },
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": ["instance 1", "route", "Value #Health", "Value #ActiveConns", "Value #Blocked", "Value #Destinations", "Value #Rate"]
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "instance 1": "Router",
+              "route": "Route",
+              "Value #Health": "Health",
+              "Value #ActiveConns": "Aktive Verbindungen",
+              "Value #Blocked": "Blocked Hosts",
+              "Value #Destinations": "Destinations",
+              "Value #Rate": "Neue Verbindungen/s"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Aktuell gesperrte Client-Hosts pro Route.\n\nEin Host wird gesperrt, wenn er `max_connect_errors` (MySQL-Parameter) überschreitet. Die Sperre wird automatisch aufgehoben, wenn sich der Host erfolgreich verbindet oder der Router neu gestartet wird.\n\n**Grenzwert:**\n- 🟢 0 — kein Problem\n- 🔴 ≥ 1 — Client-Host gesperrt; Credentials und Netzwerk prüfen",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 10, "w": 8, "x": 16, "y": 20},
+      "id": 12,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "mysql_router_route_blocked_hosts{job=\"mysql_router\", instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{instance}} / {{route}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Blocked Hosts pro Route",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Zeitlicher Verlauf des Route-Health-Status (1 = gesund, 0 = ausgefallen).\n\nEin Abfall auf 0 bedeutet, dass die Route keine erreichbaren Backend-MySQL-Nodes hat. Kurze Einbrüche deuten auf Failover-Ereignisse im InnoDB Cluster hin (Primary-Wechsel dauert typisch 5–30 s).\n\n**Grenzwerte:**\n- 🟢 1 — alle Backends erreichbar\n- 🔴 0 — Route komplett ausgefallen; keine Verbindungen möglich",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {"mode": "line"}
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {"color": "red", "index": 0, "text": "Unhealthy"},
+                "1": {"color": "green", "index": 1, "text": "Healthy"}
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          },
+          "unit": "none",
+          "min": 0,
+          "max": 1.1
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 30},
+      "id": 13,
+      "options": {
+        "legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "none"}
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "mysql_router_route_health{job=\"mysql_router\", instance=~\"$instance\"}",
+          "legendFormat": "{{instance}} / {{route}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Route Health Timeline",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Ergebnis des letzten Metadata-Cache-Refreshes pro Router-Instanz.\n\nDer Metadata Cache wird standardmäßig alle 5 Sekunden aktualisiert und enthält die InnoDB-Cluster-Topologie (welcher Node ist Primary, welche sind Replicas, welche sind ausgefallen).\n\n**Grenzwerte:**\n- 🟢 OK (1) — Refresh erfolgreich\n- 🔴 Fehler (0) — Router kann Cluster-Topologie nicht abfragen; Routing-Entscheidungen basieren auf veralteten Daten",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [
+            {
+              "options": {
+                "0": {"color": "red", "index": 0, "text": "Fehler"},
+                "1": {"color": "green", "index": 1, "text": "OK"}
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 30},
+      "id": 14,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "mysql_router_metadata_refresh_succeeded{job=\"mysql_router\", instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Metadata Cache Refresh — Ergebnis",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Zeit in Sekunden seit dem letzten erfolgreichen Metadata-Cache-Refresh.\n\nDer Standard-Refresh-Interval des MySQL Routers beträgt 5 Sekunden. Ein hoher Wert bedeutet, dass der Router keine aktuelle Cluster-Topologie hat und Failover-Ereignisse nicht bemerkt.\n\n**Grenzwerte:**\n- 🟢 < 60 s — frische Daten (≤ 12 ausgelassene Refreshes)\n- 🟡 60–299 s — veraltete Topologiedaten; Konnektivität zwischen Router und Cluster prüfen\n- 🔴 ≥ 300 s — kritisch; Router arbeitet seit > 5 Min mit veralteter Topologie",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 60},
+              {"color": "red", "value": 300}
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 30},
+      "id": 15,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "time() - mysql_router_metadata_last_refresh_timestamp{job=\"mysql_router\", instance=~\"$instance\"}",
+          "instant": true,
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Letzter Metadata Refresh — vor",
+      "type": "stat"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["mysql", "router", "mysql-router"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "definition": "label_values(mysql_router_up{job=\"mysql_router\"}, instance)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Router Instanz",
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": {
+          "query": "label_values(mysql_router_up{job=\"mysql_router\"}, instance)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "MySQL Router — Übersicht",
+  "uid": "mysql-router-overview",
+  "version": 2,
+  "weekStart": ""
+}
