@@ -8,7 +8,7 @@ Dashboard thresholds (mysql-router-overview.json):
   Throughput RX/TX:   yellow >= 10 MB, red >= 100 MB
 
 Usage:
-  uv run python client/client.py [light|medium|heavy] [--duration N] [--cleanup]
+  uv run python client/client.py [nano|light|medium|heavy] [--duration N] [--cleanup]
 """
 import argparse
 import os
@@ -31,12 +31,14 @@ USER = os.environ.get("DEMO_USER", "demouser")
 PASSWORD = os.environ.get("DEMO_PASSWORD", "demosecret123")
 DATABASE = os.environ.get("DEMO_DB", "appdb")
 
-# Each level targets a specific Grenzbereich in the dashboard
+# Each level targets a specific Grenzbereich in the dashboard.
+# Tuned for WiFi + small cluster on N150 hardware.
 LEVELS = {
-    #                 persistent  burst   bulk   payload_kb
-    "light":  dict(persistent=20,  burst=2,  bulk=1, payload_kb=64),    # stays green
-    "medium": dict(persistent=60,  burst=5,  bulk=2, payload_kb=256),   # hits yellow
-    "heavy":  dict(persistent=220, burst=15, bulk=5, payload_kb=1024),  # hits red
+    #                persistent  burst  bulk   payload_kb  query_sleep  burst_sleep  write_sleep
+    "nano":   dict(persistent=5,   burst=1, bulk=1, payload_kb=16,  query_sleep=5.0, burst_sleep=2.0, write_sleep=5.0),   # well below green
+    "light":  dict(persistent=15,  burst=1, bulk=1, payload_kb=64,  query_sleep=2.0, burst_sleep=1.0, write_sleep=3.0),   # stays green
+    "medium": dict(persistent=55,  burst=3, bulk=1, payload_kb=256, query_sleep=1.0, burst_sleep=0.5, write_sleep=2.0),   # hits yellow
+    "heavy":  dict(persistent=80,  burst=8, bulk=2, payload_kb=512, query_sleep=0.5, burst_sleep=0.2, write_sleep=1.0),   # hits red
 }
 
 _stop = threading.Event()
@@ -54,7 +56,11 @@ def _connect(port):
     return mysql.connector.connect(
         host=ROUTER_HOST, port=port,
         user=USER, password=PASSWORD, database=DATABASE,
-        connection_timeout=5, autocommit=True,
+        connection_timeout=10,
+        # read/write timeout for WiFi resilience (seconds)
+        # mysql-connector uses these as socket timeouts
+        autocommit=True,
+        get_warnings=False,
     )
 
 
@@ -69,79 +75,96 @@ def _setup():
         )
     """)
     seed = "x" * 1024
-    for _ in range(200):
+    for _ in range(100):
         cur.execute("INSERT INTO load_data (payload) VALUES (%s)", (seed,))
     conn.commit()
+    cur.close()
     conn.close()
 
 
 def _cleanup():
     try:
         conn = _connect(ROUTER_RW_PORT)
-        conn.cursor().execute("DROP TABLE IF EXISTS load_data")
+        cur = conn.cursor()
+        cur.execute("DROP TABLE IF EXISTS load_data")
         conn.commit()
+        cur.close()
         conn.close()
     except Exception as exc:
         print(f"cleanup error: {exc}")
 
 
-def _persistent_reader(port):
-    """Keeps one connection alive and polls continuously — drives active-connection count."""
+def _persistent_reader(port, query_sleep):
+    """Keeps one connection alive and polls at a controlled rate."""
     while not _stop.is_set():
+        conn = None
         try:
             conn = _connect(port)
             _inc(active=1, total=1)
-            try:
-                cur = conn.cursor()
-                while not _stop.is_set():
-                    cur.execute("SELECT * FROM load_data LIMIT 500")
-                    rows = cur.fetchall()
-                    _inc(queries=1, bytes_rx=sum(len(str(r)) for r in rows))
-                    time.sleep(0.1)
-            finally:
-                conn.close()
-                _inc(active=-1)
+            cur = conn.cursor()
+            while not _stop.is_set():
+                cur.execute("SELECT id, ts FROM load_data ORDER BY RAND() LIMIT 50")
+                rows = cur.fetchall()
+                _inc(queries=1, bytes_rx=sum(len(str(r)) for r in rows))
+                _stop.wait(timeout=query_sleep)
         except Exception:
             _inc(errors=1)
-            time.sleep(1)
+            _stop.wait(timeout=3)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                _inc(active=-1)
 
 
-def _burst_connector():
-    """Opens and closes connections at ~50/s — drives new-connections-per-second metric."""
+def _burst_connector(burst_sleep):
+    """Opens and closes connections at a controlled rate — drives new-conn/s metric."""
     while not _stop.is_set():
+        conn = None
         try:
             conn = _connect(ROUTER_RO_PORT)
             _inc(active=1, total=1)
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT 1")
-                cur.fetchall()
-                _inc(queries=1)
-            finally:
-                conn.close()
-                _inc(active=-1)
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.fetchall()
+            cur.close()
+            _inc(queries=1)
         except Exception:
             _inc(errors=1)
-        time.sleep(0.02)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                _inc(active=-1)
+        _stop.wait(timeout=burst_sleep)
 
 
-def _bulk_writer(payload_kb):
-    """Inserts large rows — drives TX bytes metric."""
+def _bulk_writer(payload_kb, write_sleep):
+    """Inserts rows — drives TX bytes metric."""
     payload = "".join(random.choices(string.ascii_lowercase, k=payload_kb * 1024))
     while not _stop.is_set():
+        conn = None
         try:
             conn = _connect(ROUTER_RW_PORT)
             _inc(active=1, total=1)
-            try:
-                cur = conn.cursor()
-                cur.execute("INSERT INTO load_data (payload) VALUES (%s)", (payload,))
-                _inc(queries=1, bytes_tx=len(payload))
-            finally:
-                conn.close()
-                _inc(active=-1)
+            cur = conn.cursor()
+            cur.execute("INSERT INTO load_data (payload) VALUES (%s)", (payload,))
+            cur.close()
+            _inc(queries=1, bytes_tx=len(payload))
         except Exception:
             _inc(errors=1)
-        time.sleep(0.2)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                _inc(active=-1)
+        _stop.wait(timeout=write_sleep)
 
 
 def _printer():
@@ -163,7 +186,7 @@ def _printer():
     print("-" * len(header))
 
     while not _stop.is_set():
-        time.sleep(5)
+        _stop.wait(timeout=10)
         with _lock:
             s = dict(_stats)
         print(
@@ -183,13 +206,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 levels:
-  light   stays green   (20 conn, 2 burst threads)
-  medium  hits yellow   (60 conn, 5 burst threads)   [default]
-  heavy   hits red     (220 conn, 15 burst threads)
+  nano    well below green  ( 5 conn, 1 burst thread)  [WiFi/N150 safe]
+  light   stays green       (15 conn, 1 burst thread)
+  medium  hits yellow       (55 conn, 3 burst threads)  [default]
+  heavy   hits red          (80 conn, 8 burst threads)
 
 examples:
+  uv run python client/client.py nano --duration 300
   uv run python client/client.py medium --duration 120
-  uv run python client/client.py heavy
   uv run python client/client.py --cleanup
         """,
     )
@@ -214,10 +238,13 @@ examples:
     print(f"  Burst-connector threads: {cfg['burst']:3d}   (yellow>=10/s new conn, red>=50/s)")
     print(f"  Bulk-writer threads    : {cfg['bulk']:3d}   (yellow>=10 MB TX, red>=100 MB)")
     print(f"  Bulk payload           : {cfg['payload_kb']} KB per insert")
+    print(f"  Query interval         : {cfg['query_sleep']}s per persistent reader")
+    print(f"  Burst interval         : {cfg['burst_sleep']}s per burst thread")
+    print(f"  Write interval         : {cfg['write_sleep']}s per bulk writer")
     print()
 
     if not args.no_setup:
-        print("Creating load_data table with 200 seed rows ...")
+        print("Creating load_data table with 100 seed rows ...")
         _setup()
         print("Done.\n")
 
@@ -229,19 +256,38 @@ examples:
     rw_count = cfg["persistent"] // 3
     ro_count = cfg["persistent"] - rw_count
     for _ in range(rw_count):
-        t = threading.Thread(target=_persistent_reader, args=(ROUTER_RW_PORT,), daemon=True)
+        t = threading.Thread(
+            target=_persistent_reader,
+            args=(ROUTER_RW_PORT, cfg["query_sleep"]),
+            daemon=True,
+        )
         t.start()
         threads.append(t)
+        # Stagger thread startup to avoid connection storm
+        time.sleep(0.1)
     for _ in range(ro_count):
-        t = threading.Thread(target=_persistent_reader, args=(ROUTER_RO_PORT,), daemon=True)
+        t = threading.Thread(
+            target=_persistent_reader,
+            args=(ROUTER_RO_PORT, cfg["query_sleep"]),
+            daemon=True,
+        )
         t.start()
         threads.append(t)
+        time.sleep(0.1)
     for _ in range(cfg["burst"]):
-        t = threading.Thread(target=_burst_connector, daemon=True)
+        t = threading.Thread(
+            target=_burst_connector,
+            args=(cfg["burst_sleep"],),
+            daemon=True,
+        )
         t.start()
         threads.append(t)
     for _ in range(cfg["bulk"]):
-        t = threading.Thread(target=_bulk_writer, args=(cfg["payload_kb"],), daemon=True)
+        t = threading.Thread(
+            target=_bulk_writer,
+            args=(cfg["payload_kb"], cfg["write_sleep"]),
+            daemon=True,
+        )
         t.start()
         threads.append(t)
 
@@ -254,8 +300,15 @@ examples:
     else:
         _stop.wait()
 
-    print("\nStopping ...")
-    _cleanup()
+    print("\nStopping — waiting for connections to close ...")
+    # Give worker threads a moment to finish their current operation and close connections
+    for t in threads:
+        t.join(timeout=15)
+
+    with _lock:
+        still_open = _stats["active"]
+    if still_open > 0:
+        print(f"  Warning: {still_open} connection(s) did not close cleanly.")
     print("Done.")
 
 
