@@ -253,8 +253,9 @@ examples:
 
     threads = []
 
-    rw_count = cfg["persistent"] // 3
-    ro_count = cfg["persistent"] - rw_count
+    persistent = int(cfg["persistent"])
+    rw_count = persistent // 3
+    ro_count = persistent - rw_count
     for _ in range(rw_count):
         t = threading.Thread(
             target=_persistent_reader,
@@ -274,7 +275,7 @@ examples:
         t.start()
         threads.append(t)
         time.sleep(0.1)
-    for _ in range(cfg["burst"]):
+    for _ in range(int(cfg["burst"])):
         t = threading.Thread(
             target=_burst_connector,
             args=(cfg["burst_sleep"],),
@@ -282,7 +283,7 @@ examples:
         )
         t.start()
         threads.append(t)
-    for _ in range(cfg["bulk"]):
+    for _ in range(int(cfg["bulk"])):
         t = threading.Thread(
             target=_bulk_writer,
             args=(cfg["payload_kb"], cfg["write_sleep"]),
