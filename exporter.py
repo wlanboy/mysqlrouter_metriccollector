@@ -235,11 +235,18 @@ def fetch_metadata(cfg, ssl_ctx):
             ))
         if "timeLastRefreshSucceeded" in status:
             try:
-                ts = parse_iso(status["timeLastRefreshSucceeded"]).timestamp()
+                last_refresh = parse_iso(status["timeLastRefreshSucceeded"])
+                ts = last_refresh.timestamp()
                 metrics.append(Metric(
                     "mysql_router_metadata_last_refresh_timestamp", labels,
                     ts,
                     "Timestamp of the last successful metadata refresh", "gauge",
+                ))
+                age = (datetime.now(timezone.utc) - last_refresh).total_seconds()
+                metrics.append(Metric(
+                    "mysql_router_metadata_last_refresh_age_seconds", labels,
+                    age,
+                    "Seconds since last successful metadata refresh", "gauge",
                 ))
             except (ValueError, KeyError) as e:
                 logging.warning("Could not parse metadata refresh timestamp: %s", e)
