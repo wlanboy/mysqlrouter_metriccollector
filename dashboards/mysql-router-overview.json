@@ -286,7 +286,7 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "expr": "min by(instance) (mysql_router_metadata_refresh_succeeded{job=\"mysql_router\", instance=~\"$instance\"})",
+          "expr": "min by(instance) (clamp_max(increase(mysql_router_metadata_refresh_succeeded_total{job=\"mysql_router\", instance=~\"$instance\"}[5m]), 1))",
           "instant": true,
           "legendFormat": "{{instance}}",
           "refId": "A"
@@ -797,7 +797,7 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "expr": "mysql_router_metadata_refresh_succeeded{job=\"mysql_router\", instance=~\"$instance\"}",
+          "expr": "clamp_max(increase(mysql_router_metadata_refresh_succeeded_total{job=\"mysql_router\", instance=~\"$instance\"}[5m]), 1)",
           "instant": true,
           "legendFormat": "{{instance}}",
           "refId": "A"
@@ -844,6 +844,46 @@
         }
       ],
       "title": "Letzter Metadata Refresh — vor",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "description": "Anzahl fehlgeschlagener Metadata-Cache-Refreshes in den letzten 5 Minuten.\n\n**Grenzwerte:**\n- 🟢 0 — keine Fehler\n- 🔴 ≥ 1 — Router kann Cluster-Topologie nicht abfragen; Konnektivität zum InnoDB Cluster prüfen",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 34},
+      "id": 16,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "increase(mysql_router_metadata_refresh_failed_total{job=\"mysql_router\", instance=~\"$instance\"}[5m])",
+          "instant": true,
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Metadata Refresh Fehler (letzte 5 Min)",
       "type": "stat"
     }
   ],

@@ -253,9 +253,15 @@ def fetch_metadata(cfg, opener):
         labels = {"instance": name}
         if "refreshSucceeded" in status:
             metrics.append(Metric(
-                "mysql_router_metadata_refresh_succeeded", labels,
-                1.0 if status["refreshSucceeded"] else 0.0,
-                "Whether the last metadata refresh succeeded", "gauge",
+                "mysql_router_metadata_refresh_succeeded_total", labels,
+                float(status["refreshSucceeded"]),
+                "Total number of successful metadata refreshes", "counter",
+            ))
+        if "refreshFailed" in status:
+            metrics.append(Metric(
+                "mysql_router_metadata_refresh_failed_total", labels,
+                float(status["refreshFailed"]),
+                "Total number of failed metadata refreshes", "counter",
             ))
         if "timeLastRefreshSucceeded" in status:
             try:

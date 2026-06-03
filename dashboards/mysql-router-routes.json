@@ -239,7 +239,7 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "expr": "min(mysql_router_metadata_refresh_succeeded{job=\"mysql_router\", instance=\"$instance\"})",
+          "expr": "min(clamp_max(increase(mysql_router_metadata_refresh_succeeded_total{job=\"mysql_router\", instance=\"$instance\"}[5m]), 1))",
           "instant": true,
           "legendFormat": "Metadata",
           "refId": "A"
@@ -877,7 +877,7 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "expr": "mysql_router_metadata_refresh_succeeded{job=\"mysql_router\", instance=\"$instance\"}",
+          "expr": "clamp_max(increase(mysql_router_metadata_refresh_succeeded_total{job=\"mysql_router\", instance=\"$instance\"}[5m]), 1)",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
