@@ -151,6 +151,37 @@ docker run -d \
   python:3.12-slim python3 /app/exporter.py
 ```
 
+### Via cron (crontab.sh)
+
+`crontab.sh` richtet einen minütlichen Cron-Job ein, der `exporter.py` im One-Shot-Modus ausführt (`SCRAPE_INTERVAL=0`). Idempotent — mehrfaches Aufrufen erstellt keinen Duplikat-Eintrag.
+
+```bash
+# Installieren
+ROUTER_PASSWORD=geheim ./crontab.sh install
+
+# Mit allen Optionen
+ROUTER_PASSWORD=geheim \
+PUSHGATEWAY_URL=http://gmk.lan:9091 \
+./crontab.sh install
+
+# Entfernen
+./crontab.sh remove
+```
+
+Umgebungsvariablen für `crontab.sh`:
+
+| Variable | Default | Beschreibung |
+|----------|---------|--------------|
+| `ROUTER_URL` | `https://127.0.0.1:8443` | MySQL Router REST API URL |
+| `ROUTER_USER` | `prometheus` | REST API User |
+| `ROUTER_PASSWORD` | — | REST API Passwort |
+| `ROUTER_TLS_VERIFY` | `false` | TLS-Zertifikat verifizieren |
+| `PUSHGATEWAY_URL` | `http://gmk.lan:9091` | Pushgateway URL |
+| `PUSHGATEWAY_JOB` | `mysql_router` | Job-Label |
+| `PUSHGATEWAY_USER` | — | Pushgateway Basic Auth User (optional) |
+| `PUSHGATEWAY_PASSWORD` | — | Pushgateway Basic Auth Passwort (optional) |
+| `LOG_FILE` | `/var/log/mysqlrouter-exporter.log` | Pfad zur Log-Datei |
+
 ---
 
 ## Gesammelte Metriken
@@ -207,6 +238,7 @@ mysql_router_route_active_connections{route="bootstrap_ro"} 1.0
 mysqlrouter_metriccollector/
 ├── router.sh     — MySQL Router Setup (Bootstrap, Config, Start/Stop)
 ├── exporter.py   — Prometheus Exporter (einzelne Datei, keine weiteren Module)
+├── crontab.sh    — Cron-Job einrichten / entfernen (minütlicher One-Shot)
 ├── spec.md       — Technische Spezifikation
 └── README.md     — Diese Datei
 ```
