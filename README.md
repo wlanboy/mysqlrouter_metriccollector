@@ -180,7 +180,7 @@ Umgebungsvariablen für `crontab.sh`:
 | `PUSHGATEWAY_JOB` | `mysql_router` | Job-Label |
 | `PUSHGATEWAY_USER` | — | Pushgateway Basic Auth User (optional) |
 | `PUSHGATEWAY_PASSWORD` | — | Pushgateway Basic Auth Passwort (optional) |
-| `LOG_FILE` | `/var/log/mysqlrouter-exporter.log` | Pfad zur Log-Datei |
+| `LOG_FILE` | `<script-dir>/mysqlrouter-exporter.log` | Pfad zur Log-Datei |
 
 ---
 
