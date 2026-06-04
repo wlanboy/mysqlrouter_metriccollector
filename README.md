@@ -6,23 +6,84 @@ Läuft standardmäßig als Daemon-Loop (60-Sekunden-Intervall) oder optional als
 
 ---
 
-## Voraussetzungen
+## router.sh — MySQL Router Setup
 
-- Python 3.7+
-- MySQL Router mit aktivierter REST API (dateibasiertes Auth-Backend)
-- Prometheus Pushgateway
+`router.sh` bootstrapt und startet MySQL Router als Docker-Container gegen ein bestehendes MySQL-Cluster (InnoDB ReplicaSet / Async Replication).
 
-### MySQL Router REST API vorbereiten
+### Voraussetzungen
 
-Der Exporter benötigt einen dedizierten User im Router. Einmalig einrichten via `router.sh create-user` aus dem übergeordneten Verzeichnis:
+- Docker installiert und gestartet
+- MySQL-Cluster erreichbar (Primary + Replicas)
+- Schreibrechte auf `ROUTER_CONF_DIR` (Default: `./mysql-router-config`)
+
+### Subcommands
+
+| Befehl | Beschreibung |
+|--------|--------------|
+| `bootstrap` | Verbindet sich mit dem Primary, liest die Cluster-Topologie und schreibt `mysqlrouter.conf` |
+| `patch-conf` | Trägt Connection-Pool-Settings in die Classic-Protocol-Sektionen ein (nach bootstrap ausführen) |
+| `create-user` | Stellt das REST-API-Auth-Backend auf dateibasiert um und legt den Exporter-User an |
+| `stop` | Stoppt den laufenden Router-Container |
+| `start` | Startet den Router-Container (entfernt vorher einen gestoppten Container gleichen Namens) |
+| `all` | bootstrap → patch-conf → create-user (wenn `EXPORTER_PASSWORD` gesetzt) → start |
+
+### Typischer Erststart
 
 ```bash
-EXPORTER_PASSWORD=geheim ../router.sh create-user
+# Einmalig: Router bootstrappen, konfigurieren und starten
+EXPORTER_PASSWORD=geheim ./router.sh all
 ```
 
-Dieser Befehl:
-- Stellt das Auth-Backend in `mysqlrouter.conf` auf `file` um
-- Legt den User `prometheus` mit dem angegebenen Passwort an
+```bash
+# Oder schrittweise:
+./router.sh bootstrap
+./router.sh patch-conf
+EXPORTER_PASSWORD=geheim ./router.sh create-user
+./router.sh start
+```
+
+### Betrieb
+
+```bash
+./router.sh stop
+./router.sh start
+```
+
+### Umgebungsvariablen
+
+| Variable | Default | Beschreibung |
+|----------|---------|--------------|
+| `PRIMARY_IP` | `192.168.178.218` | IP des Primary-Knotens |
+| `PRIMARY_PORT` | `3306` | Port des Primary |
+| `REPLICA1_IP` | `192.168.178.219` | IP Replica 1 |
+| `REPLICA2_IP` | `192.168.178.220` | IP Replica 2 |
+| `CLUSTER_USER` | `clusteradmin` | Admin-User für Bootstrap |
+| `CLUSTER_PASSWORD` | `clusteradminsecret` | Admin-Passwort |
+| `ROUTER_NAME` | `mysql-router` | Docker-Container-Name |
+| `ROUTER_CONF_DIR` | `./mysql-router-config` | Verzeichnis für `mysqlrouter.conf` |
+| `MYSQL_VERSION` | `8.0` | Docker-Image-Tag (`mysql/mysql-router`) |
+| `EXPORTER_USER` | `prometheus` | REST-API-User für den Exporter |
+| `EXPORTER_PASSWORD` | — | Passwort für den Exporter-User (Pflicht für `create-user`) |
+
+### Ports nach dem Start
+
+| Port | Protokoll | Funktion |
+|------|-----------|----------|
+| 6446 | Classic | Read/Write → Primary |
+| 6447 | Classic | Read-Only → Replicas |
+| 6448 | X Protocol | Read/Write |
+| 6449 | X Protocol | Read-Only |
+| 8443 | HTTPS | REST API / Metriken |
+
+---
+
+## exporter.py — Prometheus Exporter
+
+### Voraussetzungen
+
+- Python 3.7+
+- MySQL Router mit aktivierter REST API (dateibasiertes Auth-Backend, eingerichtet via `router.sh create-user`)
+- Prometheus Pushgateway
 
 ---
 
@@ -41,7 +102,7 @@ Alle Parameter werden über Environment Variables gesetzt:
 | `PUSHGATEWAY_INSTANCE` | Hostname                  | Instance-Label im Pushgateway                     |
 | `PUSHGATEWAY_USER`     | —                         | Basic Auth User für Pushgateway (optional)        |
 | `PUSHGATEWAY_PASSWORD` | —                         | Basic Auth Passwort für Pushgateway (optional)    |
-| `SCRAPE_INTERVAL`      | `60`                      | Sekunden zwischen Scrapes; `0` = One-Shot         |
+| `SCRAPE_INTERVAL`      | `15`                      | Sekunden zwischen Scrapes; `0` = One-Shot         |
 | `LOG_LEVEL`            | `INFO`                    | `DEBUG`, `INFO`, `ERROR`                          |
 
 ---
@@ -144,7 +205,8 @@ mysql_router_route_active_connections{route="bootstrap_ro"} 1.0
 
 ```
 mysqlrouter_metriccollector/
-├── exporter.py   — Hauptscript (einzelne Datei, keine weiteren Module)
+├── router.sh     — MySQL Router Setup (Bootstrap, Config, Start/Stop)
+├── exporter.py   — Prometheus Exporter (einzelne Datei, keine weiteren Module)
 ├── spec.md       — Technische Spezifikation
 └── README.md     — Diese Datei
 ```
