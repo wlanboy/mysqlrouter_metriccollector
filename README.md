@@ -236,7 +236,8 @@ mysql_router_route_active_connections{route="bootstrap_ro"} 1.0
 
 ```
 mysqlrouter_metriccollector/
-├── router.sh     — MySQL Router Setup (Bootstrap, Config, Start/Stop)
+├── router.sh     — MySQL Router Setup als Docker-Container (Bootstrap, Config, Start/Stop)
+├── router.md     — Anleitung für RPM/DEB-Installation: REST API und Exporter-User einrichten
 ├── exporter.py   — Prometheus Exporter (einzelne Datei, keine weiteren Module)
 ├── crontab.sh    — Cron-Job einrichten / entfernen (minütlicher One-Shot)
 ├── spec.md       — Technische Spezifikation
