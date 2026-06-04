@@ -5,6 +5,7 @@
 # Usage:
 #   ./crontab.sh install   — add cron entry (default)
 #   ./crontab.sh remove    — remove cron entry
+#   ./crontab.sh run       — run exporter once now (same command as cron uses)
 
 set -euo pipefail
 
@@ -57,13 +58,19 @@ remove_cron() {
   echo "==> Cron entry removed."
 }
 
+run_once() {
+  echo "==> Running exporter now..."
+  env ${CRON_ENV} python3 "${SCRIPT_DIR}/exporter.py"
+}
+
 CMD="${1:-install}"
 
 case "${CMD}" in
   install) install_cron ;;
   remove)  remove_cron ;;
+  run)     run_once ;;
   *)
-    echo "Usage: $0 [install|remove]"
+    echo "Usage: $0 [install|remove|run]"
     exit 1
     ;;
 esac
