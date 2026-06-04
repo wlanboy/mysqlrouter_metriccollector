@@ -21,7 +21,7 @@ Läuft standardmäßig als Daemon-Loop (60-Sekunden-Intervall) oder optional als
 | Befehl | Beschreibung |
 |--------|--------------|
 | `bootstrap` | Verbindet sich mit dem Primary, liest die Cluster-Topologie und schreibt `mysqlrouter.conf` |
-| `patch-conf` | Trägt Connection-Pool-Settings in die Classic-Protocol-Sektionen ein (nach bootstrap ausführen) |
+| `patch-conf` | Trägt `connection_sharing`, `connection_sharing_delay` und `max_idle_server_connections` in die Classic-Protocol-Sektionen ein (nach bootstrap ausführen) |
 | `create-user` | Stellt das REST-API-Auth-Backend auf dateibasiert um und legt den Exporter-User an |
 | `stop` | Stoppt den laufenden Router-Container |
 | `start` | Startet den Router-Container (entfernt vorher einen gestoppten Container gleichen Namens) |
@@ -61,7 +61,7 @@ EXPORTER_PASSWORD=geheim ./router.sh create-user
 | `CLUSTER_PASSWORD` | `clusteradminsecret` | Admin-Passwort |
 | `ROUTER_NAME` | `mysql-router` | Docker-Container-Name |
 | `ROUTER_CONF_DIR` | `./mysql-router-config` | Verzeichnis für `mysqlrouter.conf` |
-| `MYSQL_VERSION` | `8.0` | Docker-Image-Tag (`mysql/mysql-router`) |
+| `MYSQL_VERSION` | `8.0` | Docker-Image-Tag (`mysql/mysql-router`) — aktuellster Tag: `8.0.32` |
 | `EXPORTER_USER` | `prometheus` | REST-API-User für den Exporter |
 | `EXPORTER_PASSWORD` | — | Passwort für den Exporter-User (Pflicht für `create-user`) |
 
@@ -121,7 +121,7 @@ uv run python exporter.py
 
 ```bash
 ROUTER_PASSWORD=geheim \
-PUSHGATEWAY_URL=http://prometheus:9091 \
+PUSHGATEWAY_URL=http://gmk.lan:9091 \
 SCRAPE_INTERVAL=15 \
 uv run python exporter.py
 ```
