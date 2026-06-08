@@ -77,12 +77,88 @@ EXPORTER_PASSWORD=geheim ./router.sh create-user
 
 ---
 
+## REST-API-User manuell anlegen
+
+`router.sh create-user` erledigt das automatisch. Wer den Router ohne dieses Script betreibt (z.B. RPM/DEB-Installation oder ein fremdes Docker-Setup), muss die folgenden Schritte von Hand durchführen.
+
+### Hintergrund
+
+Nach dem Bootstrap setzt MySQL Router das Auth-Backend der REST API auf `metadata_cache` — d.h. Credentials werden gegen die MySQL-Metadaten geprüft. Ein dedizierter Exporter-User funktioniert damit nicht. Das Backend muss auf `file` umgestellt werden, dann verwaltet eine lokale Passwortdatei die Zugangsdaten.
+
+### Schritt 1 — `mysqlrouter.conf` anpassen
+
+In `/etc/mysqlrouter/mysqlrouter.conf` (oder dem konfigurierten `--directory`) die Sektion `[http_auth_backend:...]` suchen und zwei Werte setzen:
+
+```ini
+[http_auth_backend:default_auth_backend]
+backend=file
+filename=/etc/mysqlrouter/prometheus-users.conf
+```
+
+> Der Sektionsname kann nach dem Bootstrap leicht variieren (`default_auth_backend` ist der Regelfall). Im Zweifel mit `grep '\[http_auth_backend' mysqlrouter.conf` prüfen.
+
+### Schritt 2 — Exporter-User anlegen
+
+Das Tool `mysqlrouter_passwd` schreibt einen Eintrag (bcrypt-Hash) in die Passwortdatei:
+
+```bash
+# Nativ (RPM/DEB):
+printf 'geheim\ngeheim\n' | sudo mysqlrouter_passwd set \
+  /etc/mysqlrouter/prometheus-users.conf prometheus
+
+# Docker — Image enthält mysqlrouter_passwd:
+printf 'geheim\ngeheim\n' | docker run --rm -i \
+  -v /pfad/zum/config-verzeichnis:/etc/mysqlrouter \
+  mysql/mysql-router:8.0 \
+  mysqlrouter_passwd set /etc/mysqlrouter/prometheus-users.conf prometheus
+```
+
+Anschließend Datei-Permissions sichern (der Router-Prozess muss lesen dürfen):
+
+```bash
+sudo chown mysqlrouter:mysqlrouter /etc/mysqlrouter/prometheus-users.conf
+sudo chmod 640 /etc/mysqlrouter/prometheus-users.conf
+```
+
+### Schritt 3 — Router neu starten und testen
+
+```bash
+# Systemd:
+sudo systemctl restart mysqlrouter
+
+# Docker:
+docker restart mysql-router
+```
+
+Zugriff prüfen (TLS-Zertifikat des Routers ist selbstsigniert, daher `-k`):
+
+```bash
+curl -sk -u prometheus:geheim \
+  https://127.0.0.1:8443/api/20190715/router/status | jq
+```
+
+Erwartete Antwort:
+
+```json
+{
+  "processId": 1234,
+  "productEdition": "MySQL Community - GPL",
+  "timeStarted": "2026-06-04T05:00:00Z",
+  "version": "8.0.32",
+  "hostname": "myhost"
+}
+```
+
+> Vollständige Anleitung für RPM/DEB-Installationen: [router.md](router.md)
+
+---
+
 ## exporter.py — Prometheus Exporter
 
 ### Voraussetzungen
 
 - Python 3.7+
-- MySQL Router mit aktivierter REST API (dateibasiertes Auth-Backend, eingerichtet via `router.sh create-user`)
+- MySQL Router mit aktivierter REST API (dateibasiertes Auth-Backend, eingerichtet via `router.sh create-user` oder manuell wie oben beschrieben)
 - Prometheus Pushgateway
 
 ---
