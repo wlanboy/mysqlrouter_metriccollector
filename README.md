@@ -6,82 +6,13 @@ Läuft standardmäßig als Daemon-Loop (60-Sekunden-Intervall) oder optional als
 
 ---
 
-## router.sh — MySQL Router Setup
-
-`router.sh` bootstrapt und startet MySQL Router als Docker-Container gegen ein bestehendes MySQL-Cluster (InnoDB ReplicaSet / Async Replication).
-
-### Voraussetzungen
+## Voraussetzungen
 
 - Docker installiert und gestartet
 - MySQL-Cluster erreichbar (Primary + Replicas)
-- Schreibrechte auf `ROUTER_CONF_DIR` (Default: `./mysql-router-config`)
 
-### Subcommands
-
-| Befehl | Beschreibung |
-|--------|--------------|
-| `bootstrap` | Verbindet sich mit dem Primary, liest die Cluster-Topologie und schreibt `mysqlrouter.conf` |
-| `patch-conf` | Trägt `connection_sharing`, `connection_sharing_delay` und `max_idle_server_connections` in die Classic-Protocol-Sektionen ein (nach bootstrap ausführen) |
-| `create-user` | Stellt das REST-API-Auth-Backend auf dateibasiert um und legt den Exporter-User an |
-| `stop` | Stoppt den laufenden Router-Container |
-| `start` | Startet den Router-Container (entfernt vorher einen gestoppten Container gleichen Namens) |
-| `all` | bootstrap → patch-conf → create-user (wenn `EXPORTER_PASSWORD` gesetzt) → start |
-
-### Typischer Erststart
-
-```bash
-# Einmalig: Router bootstrappen, konfigurieren und starten
-EXPORTER_PASSWORD=geheim ./router.sh all
-```
-
-```bash
-# Oder schrittweise:
-./router.sh bootstrap
-./router.sh patch-conf
-EXPORTER_PASSWORD=geheim ./router.sh create-user
-./router.sh start
-```
-
-### Betrieb
-
-```bash
-./router.sh stop
-./router.sh start
-```
-
-### Umgebungsvariablen
-
-| Variable | Default | Beschreibung |
-|----------|---------|--------------|
-| `PRIMARY_IP` | `192.168.178.218` | IP des Primary-Knotens |
-| `PRIMARY_PORT` | `3306` | Port des Primary |
-| `REPLICA1_IP` | `192.168.178.219` | IP Replica 1 |
-| `REPLICA2_IP` | `192.168.178.220` | IP Replica 2 |
-| `CLUSTER_USER` | `clusteradmin` | Admin-User für Bootstrap |
-| `CLUSTER_PASSWORD` | `clusteradminsecret` | Admin-Passwort |
-| `ROUTER_NAME` | `mysql-router` | Docker-Container-Name |
-| `ROUTER_CONF_DIR` | `./mysql-router-config` | Verzeichnis für `mysqlrouter.conf` |
-| `MYSQL_VERSION` | `8.0` | Docker-Image-Tag (`mysql/mysql-router`) — aktuellster Tag: `8.0.32` |
-| `EXPORTER_USER` | `prometheus` | REST-API-User für den Exporter |
-| `EXPORTER_PASSWORD` | — | Passwort für den Exporter-User (Pflicht für `create-user`) |
-
-### Ports nach dem Start
-
-| Port | Protokoll | Funktion |
-|------|-----------|----------|
-| 6446 | Classic | Read/Write → Primary |
-| 6447 | Classic | Read-Only → Replicas |
-| 6448 | X Protocol | Read/Write |
-| 6449 | X Protocol | Read-Only |
-| 8443 | HTTPS | REST API / Metriken |
-
----
 
 ## REST-API-User manuell anlegen
-
-`router.sh create-user` erledigt das automatisch. Wer den Router ohne dieses Script betreibt (z.B. RPM/DEB-Installation oder ein fremdes Docker-Setup), muss die folgenden Schritte von Hand durchführen.
-
-### Hintergrund
 
 Nach dem Bootstrap setzt MySQL Router das Auth-Backend der REST API auf `metadata_cache` — d.h. Credentials werden gegen die MySQL-Metadaten geprüft. Ein dedizierter Exporter-User funktioniert damit nicht. Das Backend muss auf `file` umgestellt werden, dann verwaltet eine lokale Passwortdatei die Zugangsdaten.
 
