@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 # Requires Python 2.7.9+ (ssl.create_default_context and urllib2.HTTPSHandler(context=...) support)
 import base64
 import json
@@ -9,13 +7,16 @@ import re
 import socket
 import ssl
 import time
-import urllib2
 from collections import namedtuple
 from datetime import datetime, timedelta, tzinfo
+
+import urllib2
 
 Metric = namedtuple("Metric", ["name", "labels", "value", "help", "type"])
 
 API_VERSION = "20190715"
+
+logger = logging.getLogger(__name__)
 
 
 class _UTC(tzinfo):
@@ -60,40 +61,39 @@ def make_opener(tls_verify):
 
 
 def make_auth_header(user, password):
-    credentials = base64.b64encode("{}:{}".format(user, password))
-    return {"Authorization": "Basic {}".format(credentials)}
+    credentials = base64.b64encode(f"{user}:{password}")
+    return {"Authorization": f"Basic {credentials}"}
 
 
 def parse_iso(s):
     s = s.replace("Z", "+00:00")
     match = re.match(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d+)?[+-]\d{2}:\d{2}", s)
     if not match:
-        raise ValueError("Cannot parse datetime: {}".format(s))
-    dt = datetime.strptime(match.group(1), "%Y-%m-%dT%H:%M:%S")
-    return dt.replace(tzinfo=_utc)
+        raise ValueError(f"Cannot parse datetime: {s}")
+    return datetime.strptime(match.group(1), "%Y-%m-%dT%H:%M:%S").replace(tzinfo=_utc)
 
 
 def uptime_seconds(started_str):
     started = parse_iso(started_str)
-    now = datetime.utcnow().replace(tzinfo=_utc)
+    now = datetime.now(_utc)
     return (now - started).total_seconds()
 
 
 def api_get(base_url, path, user, password, opener):
-    url = "{}/api/{}/{}".format(base_url, API_VERSION, path)
+    url = f"{base_url}/api/{API_VERSION}/{path}"
     headers = make_auth_header(user, password)
     req = urllib2.Request(url, headers=headers)
     try:
         resp = opener.open(req, timeout=10)
         return json.loads(resp.read().decode("utf-8"))
     except urllib2.HTTPError as e:
-        logging.warning("HTTP %s for %s", e.code, url)
+        logger.warning("HTTP %s for %s", e.code, url)
         return None
     except urllib2.URLError as e:
-        logging.warning("URL error for %s: %s", url, e.reason)
+        logger.warning("URL error for %s: %s", url, e.reason)
         return None
     except ValueError as e:
-        logging.warning("JSON parse error for %s: %s", url, e)
+        logger.warning("JSON parse error for %s: %s", url, e)
         return None
 
 
@@ -132,7 +132,7 @@ def fetch_router_status(cfg, opener):
                 "gauge",
             ))
         except (ValueError, KeyError) as e:
-            logging.warning("Could not compute uptime: %s", e)
+            logger.warning("Could not compute uptime: %s", e)
 
     return metrics
 
@@ -149,7 +149,7 @@ def fetch_routes(cfg, opener):
 
 def fetch_route_status(cfg, opener, route):
     data = api_get(
-        cfg["router_url"], "routes/{}/status".format(route),
+        cfg["router_url"], f"routes/{route}/status",
         cfg["router_user"], cfg["router_password"], opener
     )
     if data is None:
@@ -179,7 +179,7 @@ def fetch_route_status(cfg, opener, route):
 
 def fetch_route_health(cfg, opener, route):
     data = api_get(
-        cfg["router_url"], "routes/{}/health".format(route),
+        cfg["router_url"], f"routes/{route}/health",
         cfg["router_user"], cfg["router_password"], opener
     )
     if data is None:
@@ -194,7 +194,7 @@ def fetch_route_health(cfg, opener, route):
 
 def fetch_route_connections(cfg, opener, route):
     data = api_get(
-        cfg["router_url"], "routes/{}/connections".format(route),
+        cfg["router_url"], f"routes/{route}/connections",
         cfg["router_user"], cfg["router_password"], opener
     )
     if data is None:
@@ -218,7 +218,7 @@ def fetch_route_connections(cfg, opener, route):
 
 def fetch_route_destinations(cfg, opener, route):
     data = api_get(
-        cfg["router_url"], "routes/{}/destinations".format(route),
+        cfg["router_url"], f"routes/{route}/destinations",
         cfg["router_user"], cfg["router_password"], opener
     )
     if data is None:
@@ -245,7 +245,7 @@ def fetch_metadata(cfg, opener):
         if not name:
             continue
         status = api_get(
-            cfg["router_url"], "metadata/{}/status".format(name),
+            cfg["router_url"], f"metadata/{name}/status",
             cfg["router_user"], cfg["router_password"], opener
         )
         if status is None:
@@ -266,14 +266,14 @@ def fetch_metadata(cfg, opener):
                     ts,
                     "Timestamp of the last successful metadata refresh", "gauge",
                 ))
-                age = (datetime.utcnow().replace(tzinfo=_utc) - last_refresh).total_seconds()
+                age = (datetime.now(_utc) - last_refresh).total_seconds()
                 metrics.append(Metric(
                     "mysql_router_metadata_last_refresh_age_seconds", labels,
                     age,
                     "Seconds since last successful metadata refresh", "gauge",
                 ))
             except (ValueError, KeyError) as e:
-                logging.warning("Could not parse metadata refresh timestamp: %s", e)
+                logger.warning("Could not parse metadata refresh timestamp: %s", e)
     return metrics
 
 
@@ -285,7 +285,7 @@ def scrape(cfg, opener):
 
     up_metric = next((m for m in router_metrics if m.name == "mysql_router_up"), None)
     if up_metric is not None and up_metric.value == 0.0:
-        logging.error("MySQL Router is not reachable, skipping route scraping")
+        logger.error("MySQL Router is not reachable, skipping route scraping")
         return metrics
 
     routes = fetch_routes(cfg, opener)
@@ -308,18 +308,18 @@ def format_metrics(metrics):
     lines = []
     for m in metrics:
         if m.name not in seen_help:
-            lines.append("# HELP {} {}".format(m.name, m.help))
+            lines.append(f"# HELP {m.name} {m.help}")
             metric_type = "counter" if m.name.endswith("_total") else "gauge"
-            lines.append("# TYPE {} {}".format(m.name, metric_type))
+            lines.append(f"# TYPE {m.name} {metric_type}")
             seen_help.add(m.name)
         if m.labels:
             label_str = ",".join(
-                '{}="{}"'.format(k, _escape_label_value(str(v)))
+                f'{k}="{_escape_label_value(str(v))}"'
                 for k, v in sorted(m.labels.items())
             )
-            lines.append("{}{{{}}} {}".format(m.name, label_str, repr(m.value)))
+            lines.append(f"{m.name}{{{label_str}}} {m.value!r}")
         else:
-            lines.append("{} {}".format(m.name, repr(m.value)))
+            lines.append(f"{m.name} {m.value!r}")
     return "\n".join(lines) + "\n"
 
 
@@ -337,13 +337,13 @@ def push(cfg, payload):
     req = _PutRequest(url, data=data, headers=headers)
     try:
         resp = urllib2.urlopen(req, timeout=10)
-        logging.info("Pushed metrics to Pushgateway: HTTP %s", resp.getcode())
+        logger.info("Pushed metrics to Pushgateway: HTTP %s", resp.getcode())
         return True
     except urllib2.HTTPError as e:
-        logging.error("Pushgateway returned HTTP %s: %s", e.code, e.read().decode("utf-8", errors="replace"))
+        logger.error("Pushgateway returned HTTP %s: %s", e.code, e.read().decode("utf-8", errors="replace"))
         return False
     except urllib2.URLError as e:
-        logging.error("Cannot reach Pushgateway at %s: %s", url, e.reason)
+        logger.error("Cannot reach Pushgateway at %s: %s", url, e.reason)
         return False
 
 
@@ -358,10 +358,10 @@ def main():
     opener = make_opener(cfg["router_tls_verify"])
 
     def run_once():
-        logging.info("Scraping MySQL Router at %s", cfg["router_url"])
+        logger.info("Scraping MySQL Router at %s", cfg["router_url"])
         metrics = scrape(cfg, opener)
         payload = format_metrics(metrics)
-        logging.debug("Metrics payload:\n%s", payload)
+        logger.debug("Metrics payload:\n%s", payload)
         ok = push(cfg, payload)
         return ok
 
@@ -369,7 +369,7 @@ def main():
         ok = run_once()
         raise SystemExit(0 if ok else 1)
     else:
-        logging.info("Starting daemon loop, interval=%ds", cfg["scrape_interval"])
+        logger.info("Starting daemon loop, interval=%ds", cfg["scrape_interval"])
         while True:
             run_once()
             time.sleep(cfg["scrape_interval"])
