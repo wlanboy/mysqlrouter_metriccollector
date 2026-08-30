@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, tzinfo
 import urllib2
 
 Metric = namedtuple("Metric", ["name", "labels", "value", "help", "type"])
+RouterClient = namedtuple("RouterClient", ["base_url", "user", "password", "opener"])
 
 API_VERSION = "20190715"
 
@@ -79,12 +80,20 @@ def uptime_seconds(started_str):
     return (now - started).total_seconds()
 
 
-def api_get(base_url, path, user, password, opener):
-    url = f"{base_url}/api/{API_VERSION}/{path}"
-    headers = make_auth_header(user, password)
+def route_labels(route):
+    return {"route": route}
+
+
+def instance_labels(name):
+    return {"instance": name}
+
+
+def api_get(client, path):
+    url = f"{client.base_url}/api/{API_VERSION}/{path}"
+    headers = make_auth_header(client.user, client.password)
     req = urllib2.Request(url, headers=headers)
     try:
-        resp = opener.open(req, timeout=10)
+        resp = client.opener.open(req, timeout=10)
         return json.loads(resp.read().decode("utf-8"))
     except urllib2.HTTPError as e:
         logger.warning("HTTP %s for %s", e.code, url)
@@ -97,11 +106,8 @@ def api_get(base_url, path, user, password, opener):
         return None
 
 
-def fetch_router_status(cfg, opener):
-    data = api_get(
-        cfg["router_url"], "router/status",
-        cfg["router_user"], cfg["router_password"], opener
-    )
+def fetch_router_status(client):
+    data = api_get(client, "router/status")
     if data is None:
         return [Metric("mysql_router_up", {}, 0.0, "MySQL Router is reachable", "gauge")]
 
@@ -137,25 +143,19 @@ def fetch_router_status(cfg, opener):
     return metrics
 
 
-def fetch_routes(cfg, opener):
-    data = api_get(
-        cfg["router_url"], "routes",
-        cfg["router_user"], cfg["router_password"], opener
-    )
+def fetch_routes(client):
+    data = api_get(client, "routes")
     if data is None:
         return []
     return [item["name"] for item in data.get("items", []) if "name" in item]
 
 
-def fetch_route_status(cfg, opener, route):
-    data = api_get(
-        cfg["router_url"], f"routes/{route}/status",
-        cfg["router_user"], cfg["router_password"], opener
-    )
+def fetch_route_status(client, route):
+    data = api_get(client, f"routes/{route}/status")
     if data is None:
         return []
     metrics = []
-    labels = {"route": route}
+    labels = route_labels(route)
     if "activeConnections" in data:
         metrics.append(Metric(
             "mysql_router_route_active_connections", labels,
@@ -177,14 +177,11 @@ def fetch_route_status(cfg, opener, route):
     return metrics
 
 
-def fetch_route_health(cfg, opener, route):
-    data = api_get(
-        cfg["router_url"], f"routes/{route}/health",
-        cfg["router_user"], cfg["router_password"], opener
-    )
+def fetch_route_health(client, route):
+    data = api_get(client, f"routes/{route}/health")
     if data is None:
         return []
-    labels = {"route": route}
+    labels = route_labels(route)
     value = 1.0 if data.get("isAlive") else 0.0
     return [Metric(
         "mysql_router_route_health", labels, value,
@@ -192,14 +189,11 @@ def fetch_route_health(cfg, opener, route):
     )]
 
 
-def fetch_route_connections(cfg, opener, route):
-    data = api_get(
-        cfg["router_url"], f"routes/{route}/connections",
-        cfg["router_user"], cfg["router_password"], opener
-    )
+def fetch_route_connections(client, route):
+    data = api_get(client, f"routes/{route}/connections")
     if data is None:
         return []
-    labels = {"route": route}
+    labels = route_labels(route)
     bytes_from = sum(item.get("bytesFromServer", 0) for item in data.get("items", []))
     bytes_to = sum(item.get("bytesToServer", 0) for item in data.get("items", []))
     return [
@@ -216,14 +210,11 @@ def fetch_route_connections(cfg, opener, route):
     ]
 
 
-def fetch_route_destinations(cfg, opener, route):
-    data = api_get(
-        cfg["router_url"], f"routes/{route}/destinations",
-        cfg["router_user"], cfg["router_password"], opener
-    )
+def fetch_route_destinations(client, route):
+    data = api_get(client, f"routes/{route}/destinations")
     if data is None:
         return []
-    labels = {"route": route}
+    labels = route_labels(route)
     count = len(data.get("items", []))
     return [Metric(
         "mysql_router_route_destinations", labels,
@@ -232,11 +223,8 @@ def fetch_route_destinations(cfg, opener, route):
     )]
 
 
-def fetch_metadata(cfg, opener):
-    data = api_get(
-        cfg["router_url"], "metadata",
-        cfg["router_user"], cfg["router_password"], opener
-    )
+def fetch_metadata(client):
+    data = api_get(client, "metadata")
     if data is None:
         return []
     metrics = []
@@ -244,13 +232,10 @@ def fetch_metadata(cfg, opener):
         name = item.get("name")
         if not name:
             continue
-        status = api_get(
-            cfg["router_url"], f"metadata/{name}/status",
-            cfg["router_user"], cfg["router_password"], opener
-        )
+        status = api_get(client, f"metadata/{name}/status")
         if status is None:
             continue
-        labels = {"instance": name}
+        labels = instance_labels(name)
         if "refreshSucceeded" in status:
             metrics.append(Metric(
                 "mysql_router_metadata_refresh_succeeded", labels,
@@ -277,10 +262,10 @@ def fetch_metadata(cfg, opener):
     return metrics
 
 
-def scrape(cfg, opener):
+def scrape(client):
     metrics = []
 
-    router_metrics = fetch_router_status(cfg, opener)
+    router_metrics = fetch_router_status(client)
     metrics.extend(router_metrics)
 
     up_metric = next((m for m in router_metrics if m.name == "mysql_router_up"), None)
@@ -288,14 +273,14 @@ def scrape(cfg, opener):
         logger.error("MySQL Router is not reachable, skipping route scraping")
         return metrics
 
-    routes = fetch_routes(cfg, opener)
+    routes = fetch_routes(client)
     for route in routes:
-        metrics.extend(fetch_route_status(cfg, opener, route))
-        metrics.extend(fetch_route_health(cfg, opener, route))
-        metrics.extend(fetch_route_connections(cfg, opener, route))
-        metrics.extend(fetch_route_destinations(cfg, opener, route))
+        metrics.extend(fetch_route_status(client, route))
+        metrics.extend(fetch_route_health(client, route))
+        metrics.extend(fetch_route_connections(client, route))
+        metrics.extend(fetch_route_destinations(client, route))
 
-    metrics.extend(fetch_metadata(cfg, opener))
+    metrics.extend(fetch_metadata(client))
     return metrics
 
 
@@ -356,10 +341,11 @@ def main():
     )
 
     opener = make_opener(cfg["router_tls_verify"])
+    client = RouterClient(cfg["router_url"], cfg["router_user"], cfg["router_password"], opener)
 
     def run_once():
         logger.info("Scraping MySQL Router at %s", cfg["router_url"])
-        metrics = scrape(cfg, opener)
+        metrics = scrape(client)
         payload = format_metrics(metrics)
         logger.debug("Metrics payload:\n%s", payload)
         ok = push(cfg, payload)

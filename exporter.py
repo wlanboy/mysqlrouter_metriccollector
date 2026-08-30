@@ -11,6 +11,7 @@ from collections import namedtuple
 from datetime import UTC, datetime
 
 Metric = namedtuple("Metric", ["name", "labels", "value", "help", "type"])
+RouterClient = namedtuple("RouterClient", ["base_url", "user", "password", "ssl_ctx"])
 
 API_VERSION = "20190715"
 
@@ -46,12 +47,20 @@ def make_auth_header(user, password):
     return {"Authorization": f"Basic {credentials}"}
 
 
-def api_get(base_url, path, user, password, ssl_ctx):
-    url = f"{base_url}/api/{API_VERSION}/{path}"
-    headers = make_auth_header(user, password)
+def route_labels(route):
+    return {"route": route}
+
+
+def instance_labels(name):
+    return {"instance": name}
+
+
+def api_get(client, path):
+    url = f"{client.base_url}/api/{API_VERSION}/{path}"
+    headers = make_auth_header(client.user, client.password)
     req = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(req, context=ssl_ctx, timeout=10) as resp:
+        with urllib.request.urlopen(req, context=client.ssl_ctx, timeout=10) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         logger.warning("HTTP %s for %s", e.code, url)
@@ -74,11 +83,8 @@ def uptime_seconds(started_str):
     return (now - started).total_seconds()
 
 
-def fetch_router_status(cfg, ssl_ctx):
-    data = api_get(
-        cfg["router_url"], "router/status",
-        cfg["router_user"], cfg["router_password"], ssl_ctx
-    )
+def fetch_router_status(client):
+    data = api_get(client, "router/status")
     if data is None:
         return [Metric("mysql_router_up", {}, 0.0, "MySQL Router is reachable", "gauge")]
 
@@ -114,25 +120,19 @@ def fetch_router_status(cfg, ssl_ctx):
     return metrics
 
 
-def fetch_routes(cfg, ssl_ctx):
-    data = api_get(
-        cfg["router_url"], "routes",
-        cfg["router_user"], cfg["router_password"], ssl_ctx
-    )
+def fetch_routes(client):
+    data = api_get(client, "routes")
     if data is None:
         return []
     return [item["name"] for item in data.get("items", []) if "name" in item]
 
 
-def fetch_route_status(cfg, ssl_ctx, route):
-    data = api_get(
-        cfg["router_url"], f"routes/{route}/status",
-        cfg["router_user"], cfg["router_password"], ssl_ctx
-    )
+def fetch_route_status(client, route):
+    data = api_get(client, f"routes/{route}/status")
     if data is None:
         return []
     metrics = []
-    labels = {"route": route}
+    labels = route_labels(route)
     if "activeConnections" in data:
         metrics.append(Metric(
             "mysql_router_route_active_connections", labels,
@@ -154,14 +154,11 @@ def fetch_route_status(cfg, ssl_ctx, route):
     return metrics
 
 
-def fetch_route_health(cfg, ssl_ctx, route):
-    data = api_get(
-        cfg["router_url"], f"routes/{route}/health",
-        cfg["router_user"], cfg["router_password"], ssl_ctx
-    )
+def fetch_route_health(client, route):
+    data = api_get(client, f"routes/{route}/health")
     if data is None:
         return []
-    labels = {"route": route}
+    labels = route_labels(route)
     value = 1.0 if data.get("isAlive") else 0.0
     return [Metric(
         "mysql_router_route_health", labels, value,
@@ -169,14 +166,11 @@ def fetch_route_health(cfg, ssl_ctx, route):
     )]
 
 
-def fetch_route_connections(cfg, ssl_ctx, route):
-    data = api_get(
-        cfg["router_url"], f"routes/{route}/connections",
-        cfg["router_user"], cfg["router_password"], ssl_ctx
-    )
+def fetch_route_connections(client, route):
+    data = api_get(client, f"routes/{route}/connections")
     if data is None:
         return []
-    labels = {"route": route}
+    labels = route_labels(route)
     bytes_from = sum(item.get("bytesFromServer", 0) for item in data.get("items", []))
     bytes_to = sum(item.get("bytesToServer", 0) for item in data.get("items", []))
     return [
@@ -193,14 +187,11 @@ def fetch_route_connections(cfg, ssl_ctx, route):
     ]
 
 
-def fetch_route_destinations(cfg, ssl_ctx, route):
-    data = api_get(
-        cfg["router_url"], f"routes/{route}/destinations",
-        cfg["router_user"], cfg["router_password"], ssl_ctx
-    )
+def fetch_route_destinations(client, route):
+    data = api_get(client, f"routes/{route}/destinations")
     if data is None:
         return []
-    labels = {"route": route}
+    labels = route_labels(route)
     count = len(data.get("items", []))
     return [Metric(
         "mysql_router_route_destinations", labels,
@@ -209,11 +200,8 @@ def fetch_route_destinations(cfg, ssl_ctx, route):
     )]
 
 
-def fetch_metadata(cfg, ssl_ctx):
-    data = api_get(
-        cfg["router_url"], "metadata",
-        cfg["router_user"], cfg["router_password"], ssl_ctx
-    )
+def fetch_metadata(client):
+    data = api_get(client, "metadata")
     if data is None:
         return []
     metrics = []
@@ -221,13 +209,10 @@ def fetch_metadata(cfg, ssl_ctx):
         name = item.get("name")
         if not name:
             continue
-        status = api_get(
-            cfg["router_url"], f"metadata/{name}/status",
-            cfg["router_user"], cfg["router_password"], ssl_ctx
-        )
+        status = api_get(client, f"metadata/{name}/status")
         if status is None:
             continue
-        labels = {"instance": name}
+        labels = instance_labels(name)
         if "refreshSucceeded" in status:
             metrics.append(Metric(
                 "mysql_router_metadata_refresh_succeeded", labels,
@@ -254,10 +239,10 @@ def fetch_metadata(cfg, ssl_ctx):
     return metrics
 
 
-def scrape(cfg, ssl_ctx):
+def scrape(client):
     metrics = []
 
-    router_metrics = fetch_router_status(cfg, ssl_ctx)
+    router_metrics = fetch_router_status(client)
     metrics.extend(router_metrics)
 
     # If router is down (up==0 with no labels), skip route scraping
@@ -266,14 +251,14 @@ def scrape(cfg, ssl_ctx):
         logger.error("MySQL Router is not reachable, skipping route scraping")
         return metrics
 
-    routes = fetch_routes(cfg, ssl_ctx)
+    routes = fetch_routes(client)
     for route in routes:
-        metrics.extend(fetch_route_status(cfg, ssl_ctx, route))
-        metrics.extend(fetch_route_health(cfg, ssl_ctx, route))
-        metrics.extend(fetch_route_connections(cfg, ssl_ctx, route))
-        metrics.extend(fetch_route_destinations(cfg, ssl_ctx, route))
+        metrics.extend(fetch_route_status(client, route))
+        metrics.extend(fetch_route_health(client, route))
+        metrics.extend(fetch_route_connections(client, route))
+        metrics.extend(fetch_route_destinations(client, route))
 
-    metrics.extend(fetch_metadata(cfg, ssl_ctx))
+    metrics.extend(fetch_metadata(client))
     return metrics
 
 
@@ -334,10 +319,11 @@ def main():
     )
 
     ssl_ctx = make_ssl_context(cfg["router_tls_verify"])
+    client = RouterClient(cfg["router_url"], cfg["router_user"], cfg["router_password"], ssl_ctx)
 
     def run_once():
         logger.info("Scraping MySQL Router at %s", cfg["router_url"])
-        metrics = scrape(cfg, ssl_ctx)
+        metrics = scrape(client)
         payload = format_metrics(metrics)
         logger.debug("Metrics payload:\n%s", payload)
         ok = push(cfg, payload)

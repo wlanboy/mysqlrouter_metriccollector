@@ -10,8 +10,8 @@ import pytest
 import exporter
 
 
-def _router_cfg():
-    return {"router_url": "https://127.0.0.1:8443", "router_user": "prometheus", "router_password": "geheim"}
+def _router_client():
+    return exporter.RouterClient("https://127.0.0.1:8443", "prometheus", "geheim", None)
 
 
 # ---------------------------------------------------------------------------
@@ -85,27 +85,27 @@ def _mock_response(payload_bytes):
 def test_api_get_success():
     payload = json.dumps({"foo": "bar"}).encode("utf-8")
     with patch("exporter.urllib.request.urlopen", return_value=_mock_response(payload)):
-        result = exporter.api_get("https://host", "router/status", "u", "p", None)
+        result = exporter.api_get(exporter.RouterClient("https://host", "u", "p", None), "router/status")
     assert result == {"foo": "bar"}
 
 
 def test_api_get_http_error():
     err = urllib.error.HTTPError("url", 401, "Unauthorized", Message(), None)
     with patch("exporter.urllib.request.urlopen", side_effect=err):
-        result = exporter.api_get("https://host", "router/status", "u", "p", None)
+        result = exporter.api_get(exporter.RouterClient("https://host", "u", "p", None), "router/status")
     assert result is None
 
 
 def test_api_get_url_error():
     err = urllib.error.URLError("connection refused")
     with patch("exporter.urllib.request.urlopen", side_effect=err):
-        result = exporter.api_get("https://host", "router/status", "u", "p", None)
+        result = exporter.api_get(exporter.RouterClient("https://host", "u", "p", None), "router/status")
     assert result is None
 
 
 def test_api_get_json_decode_error():
     with patch("exporter.urllib.request.urlopen", return_value=_mock_response(b"not json")):
-        result = exporter.api_get("https://host", "router/status", "u", "p", None)
+        result = exporter.api_get(exporter.RouterClient("https://host", "u", "p", None), "router/status")
     assert result is None
 
 
@@ -130,7 +130,7 @@ def test_uptime_seconds():
 
 def test_fetch_router_status_unreachable():
     with patch("exporter.api_get", return_value=None):
-        metrics = exporter.fetch_router_status(_router_cfg(), None)
+        metrics = exporter.fetch_router_status(_router_client())
     assert len(metrics) == 1
     assert metrics[0] == exporter.Metric("mysql_router_up", {}, 0.0, "MySQL Router is reachable", "gauge")
 
@@ -144,7 +144,7 @@ def test_fetch_router_status_reachable_with_uptime():
         "timeStarted": started,
     }
     with patch("exporter.api_get", return_value=data):
-        metrics = exporter.fetch_router_status(_router_cfg(), None)
+        metrics = exporter.fetch_router_status(_router_client())
 
     by_name = {m.name: m for m in metrics}
     assert by_name["mysql_router_up"].value == 1.0
@@ -156,14 +156,14 @@ def test_fetch_router_status_reachable_with_uptime():
 def test_fetch_router_status_no_time_started():
     data = {"version": "8.0.36", "productEdition": "GPL", "processId": 1}
     with patch("exporter.api_get", return_value=data):
-        metrics = exporter.fetch_router_status(_router_cfg(), None)
+        metrics = exporter.fetch_router_status(_router_client())
     assert "mysql_router_uptime_seconds" not in {m.name for m in metrics}
 
 
 def test_fetch_router_status_bad_time_started_is_skipped():
     data = {"version": "8.0.36", "productEdition": "GPL", "processId": 1, "timeStarted": "not-a-date"}
     with patch("exporter.api_get", return_value=data):
-        metrics = exporter.fetch_router_status(_router_cfg(), None)
+        metrics = exporter.fetch_router_status(_router_client())
     assert "mysql_router_uptime_seconds" not in {m.name for m in metrics}
 
 
@@ -174,13 +174,13 @@ def test_fetch_router_status_bad_time_started_is_skipped():
 def test_fetch_routes():
     data = {"items": [{"name": "bootstrap_rw"}, {"name": "bootstrap_ro"}, {"no_name": True}]}
     with patch("exporter.api_get", return_value=data):
-        routes = exporter.fetch_routes(_router_cfg(), None)
+        routes = exporter.fetch_routes(_router_client())
     assert routes == ["bootstrap_rw", "bootstrap_ro"]
 
 
 def test_fetch_routes_none():
     with patch("exporter.api_get", return_value=None):
-        routes = exporter.fetch_routes(_router_cfg(), None)
+        routes = exporter.fetch_routes(_router_client())
     assert routes == []
 
 
@@ -191,7 +191,7 @@ def test_fetch_routes_none():
 def test_fetch_route_status_all_fields():
     data = {"activeConnections": 3, "totalConnections": 42, "blockedHosts": 1}
     with patch("exporter.api_get", return_value=data):
-        metrics = exporter.fetch_route_status(_router_cfg(), None, "bootstrap_rw")
+        metrics = exporter.fetch_route_status(_router_client(), "bootstrap_rw")
 
     by_name = {m.name: m for m in metrics}
     assert by_name["mysql_router_route_active_connections"].value == 3.0
@@ -202,13 +202,13 @@ def test_fetch_route_status_all_fields():
 
 def test_fetch_route_status_partial_fields():
     with patch("exporter.api_get", return_value={"activeConnections": 3}):
-        metrics = exporter.fetch_route_status(_router_cfg(), None, "bootstrap_rw")
+        metrics = exporter.fetch_route_status(_router_client(), "bootstrap_rw")
     assert [m.name for m in metrics] == ["mysql_router_route_active_connections"]
 
 
 def test_fetch_route_status_none():
     with patch("exporter.api_get", return_value=None):
-        metrics = exporter.fetch_route_status(_router_cfg(), None, "bootstrap_rw")
+        metrics = exporter.fetch_route_status(_router_client(), "bootstrap_rw")
     assert metrics == []
 
 
@@ -219,7 +219,7 @@ def test_fetch_route_status_none():
 @pytest.mark.parametrize("is_alive,expected", [(True, 1.0), (False, 0.0)])
 def test_fetch_route_health(is_alive, expected):
     with patch("exporter.api_get", return_value={"isAlive": is_alive}):
-        metrics = exporter.fetch_route_health(_router_cfg(), None, "bootstrap_rw")
+        metrics = exporter.fetch_route_health(_router_client(), "bootstrap_rw")
     assert metrics == [exporter.Metric(
         "mysql_router_route_health", {"route": "bootstrap_rw"}, expected, "Route health status", "gauge",
     )]
@@ -227,7 +227,7 @@ def test_fetch_route_health(is_alive, expected):
 
 def test_fetch_route_health_none():
     with patch("exporter.api_get", return_value=None):
-        metrics = exporter.fetch_route_health(_router_cfg(), None, "bootstrap_rw")
+        metrics = exporter.fetch_route_health(_router_client(), "bootstrap_rw")
     assert metrics == []
 
 
@@ -241,7 +241,7 @@ def test_fetch_route_connections_sums_bytes():
         {"bytesFromServer": 200, "bytesToServer": 20},
     ]}
     with patch("exporter.api_get", return_value=data):
-        metrics = exporter.fetch_route_connections(_router_cfg(), None, "bootstrap_rw")
+        metrics = exporter.fetch_route_connections(_router_client(), "bootstrap_rw")
 
     by_name = {m.name: m for m in metrics}
     assert by_name["mysql_router_route_bytes_from_server_total"].value == 300.0
@@ -251,7 +251,7 @@ def test_fetch_route_connections_sums_bytes():
 def test_fetch_route_connections_missing_fields_default_zero():
     data = {"items": [{}]}
     with patch("exporter.api_get", return_value=data):
-        metrics = exporter.fetch_route_connections(_router_cfg(), None, "bootstrap_rw")
+        metrics = exporter.fetch_route_connections(_router_client(), "bootstrap_rw")
     by_name = {m.name: m for m in metrics}
     assert by_name["mysql_router_route_bytes_from_server_total"].value == 0.0
     assert by_name["mysql_router_route_bytes_to_server_total"].value == 0.0
@@ -259,7 +259,7 @@ def test_fetch_route_connections_missing_fields_default_zero():
 
 def test_fetch_route_connections_none():
     with patch("exporter.api_get", return_value=None):
-        metrics = exporter.fetch_route_connections(_router_cfg(), None, "bootstrap_rw")
+        metrics = exporter.fetch_route_connections(_router_client(), "bootstrap_rw")
     assert metrics == []
 
 
@@ -270,7 +270,7 @@ def test_fetch_route_connections_none():
 def test_fetch_route_destinations():
     data = {"items": [{"address": "a"}, {"address": "b"}]}
     with patch("exporter.api_get", return_value=data):
-        metrics = exporter.fetch_route_destinations(_router_cfg(), None, "bootstrap_rw")
+        metrics = exporter.fetch_route_destinations(_router_client(), "bootstrap_rw")
     assert metrics == [exporter.Metric(
         "mysql_router_route_destinations", {"route": "bootstrap_rw"}, 2.0,
         "Number of destinations per route", "gauge",
@@ -279,7 +279,7 @@ def test_fetch_route_destinations():
 
 def test_fetch_route_destinations_none():
     with patch("exporter.api_get", return_value=None):
-        metrics = exporter.fetch_route_destinations(_router_cfg(), None, "bootstrap_rw")
+        metrics = exporter.fetch_route_destinations(_router_client(), "bootstrap_rw")
     assert metrics == []
 
 
@@ -293,7 +293,7 @@ def test_fetch_metadata_success():
     status = {"refreshSucceeded": True, "timeLastRefreshSucceeded": last_refresh}
 
     with patch("exporter.api_get", side_effect=[metadata_list, status]):
-        metrics = exporter.fetch_metadata(_router_cfg(), None)
+        metrics = exporter.fetch_metadata(_router_client())
 
     by_name = {m.name: m for m in metrics}
     assert by_name["mysql_router_metadata_refresh_succeeded"].value == 1.0
@@ -305,7 +305,7 @@ def test_fetch_metadata_success():
 def test_fetch_metadata_skips_item_without_name():
     metadata_list = {"items": [{}]}
     with patch("exporter.api_get", return_value=metadata_list) as mock_get:
-        metrics = exporter.fetch_metadata(_router_cfg(), None)
+        metrics = exporter.fetch_metadata(_router_client())
     assert metrics == []
     mock_get.assert_called_once()
 
@@ -313,13 +313,13 @@ def test_fetch_metadata_skips_item_without_name():
 def test_fetch_metadata_skips_when_status_none():
     metadata_list = {"items": [{"name": "mycluster"}]}
     with patch("exporter.api_get", side_effect=[metadata_list, None]):
-        metrics = exporter.fetch_metadata(_router_cfg(), None)
+        metrics = exporter.fetch_metadata(_router_client())
     assert metrics == []
 
 
 def test_fetch_metadata_none():
     with patch("exporter.api_get", return_value=None):
-        metrics = exporter.fetch_metadata(_router_cfg(), None)
+        metrics = exporter.fetch_metadata(_router_client())
     assert metrics == []
 
 
@@ -327,7 +327,7 @@ def test_fetch_metadata_bad_timestamp_still_yields_refresh_metric():
     metadata_list = {"items": [{"name": "mycluster"}]}
     status = {"refreshSucceeded": False, "timeLastRefreshSucceeded": "not-a-date"}
     with patch("exporter.api_get", side_effect=[metadata_list, status]):
-        metrics = exporter.fetch_metadata(_router_cfg(), None)
+        metrics = exporter.fetch_metadata(_router_client())
     assert [m.name for m in metrics] == ["mysql_router_metadata_refresh_succeeded"]
     assert metrics[0].value == 0.0
 
@@ -342,7 +342,7 @@ def test_scrape_skips_routes_when_router_down():
     ]), \
          patch("exporter.fetch_routes") as mock_routes, \
          patch("exporter.fetch_metadata") as mock_metadata:
-        metrics = exporter.scrape({}, None)
+        metrics = exporter.scrape(_router_client())
 
     mock_routes.assert_not_called()
     mock_metadata.assert_not_called()
@@ -362,7 +362,7 @@ def test_scrape_collects_route_and_metadata_metrics_when_up():
          patch("exporter.fetch_route_connections", return_value=[]), \
          patch("exporter.fetch_route_destinations", return_value=[]), \
          patch("exporter.fetch_metadata", return_value=[metadata_metric]):
-        metrics = exporter.scrape({}, None)
+        metrics = exporter.scrape(_router_client())
 
     assert metrics == [up_metric, route_metric, metadata_metric]
 
