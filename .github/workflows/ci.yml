@@ -33,5 +33,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Type Check (Optional aber empfohlen)
-        # Wichtig für MCP, um sicherzustellen, dass Tools die richtigen Schemas liefern
         run: uv run pyright .
+
+      - name: Type Check (Optional aber empfohlen)
+        run: uv run pytest .
